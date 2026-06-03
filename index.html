@@ -55,6 +55,21 @@
         window.firebaseConnectionStatus = 'connecting';
         window.appId = activeAppId;
 
+        // 預設部門資料 (與您的 Excel 部門完全對齊)
+        const DEFAULT_DEPARTMENTS = [
+            { id: "d1", name: "製造部" },
+            { id: "d2", name: "研發部" },
+            { id: "d3", name: "財務部" },
+            { id: "d4", name: "行銷部" },
+            { id: "d5", name: "人資組" },
+            { id: "d6", name: "行政管理部" },
+            { id: "d7", name: "物流部" },
+            { id: "d8", name: "出貨部" },
+            { id: "d9", name: "後勤部" },
+            { id: "d10", name: "廠務部" },
+            { id: "d11", name: "包裝部" }
+        ];
+
         // 預設資料庫範本 (完美對應您的「面試人員與流程.xlsx」)
         const DEFAULT_VACANCIES = [
             { id: "v1", name: "作業員", department: "製造部", steps: ["初審", "一次面試", "錄取"], interviewers: ["潘哥、全恩"] },
@@ -148,10 +163,11 @@
             }
         ];
 
-        // 系統執行時期 State
+        // 系統執行時期 State (包含新增 departments 部分)
         window.state = {
             vacancies: JSON.parse(localStorage.getItem('recruit_vacancies')) || DEFAULT_VACANCIES,
             candidates: JSON.parse(localStorage.getItem('recruit_candidates')) || DEFAULT_CANDIDATES,
+            departments: JSON.parse(localStorage.getItem('recruit_departments')) || DEFAULT_DEPARTMENTS,
             activeTab: 'dashboard',
             filters: {
                 location: 'All',
@@ -203,6 +219,16 @@
                     await deleteDoc(doc(db, 'artifacts', window.appId, 'public', 'data', 'vacancies', vacId));
                 };
 
+                window.dbSetDepartment = async (dept) => {
+                    if (!auth.currentUser) return;
+                    await setDoc(doc(db, 'artifacts', window.appId, 'public', 'data', 'departments', dept.id), dept);
+                };
+
+                window.dbDeleteDepartment = async (deptId) => {
+                    if (!auth.currentUser) return;
+                    await deleteDoc(doc(db, 'artifacts', window.appId, 'public', 'data', 'departments', deptId));
+                };
+
                 // 設定即時同步
                 setupRealtimeSync(db);
 
@@ -245,6 +271,20 @@
                 window.renderApp();
             };
 
+            window.dbSetDepartment = async (dept) => {
+                const idx = window.state.departments.findIndex(d => d.id === dept.id);
+                if (idx !== -1) window.state.departments[idx] = dept;
+                else window.state.departments.push(dept);
+                saveLocalState();
+                window.renderApp();
+            };
+
+            window.dbDeleteDepartment = async (deptId) => {
+                window.state.departments = window.state.departments.filter(d => d.id !== deptId);
+                saveLocalState();
+                window.renderApp();
+            };
+
             window.renderApp();
             setTimeout(() => {
                 window.showToast(message, true);
@@ -254,12 +294,14 @@
         function saveLocalState() {
             localStorage.setItem('recruit_vacancies', JSON.stringify(window.state.vacancies));
             localStorage.setItem('recruit_candidates', JSON.stringify(window.state.candidates));
+            localStorage.setItem('recruit_departments', JSON.stringify(window.state.departments));
         }
 
-        // 設定資料即時同步監聽
+        // 設定資料即時同步監聽 (加入 departments 的即時監聽)
         function setupRealtimeSync(db) {
             const candidatesRef = collection(db, 'artifacts', window.appId, 'public', 'data', 'candidates');
             const vacanciesRef = collection(db, 'artifacts', window.appId, 'public', 'data', 'vacancies');
+            const departmentsRef = collection(db, 'artifacts', window.appId, 'public', 'data', 'departments');
 
             // 監聽面試者狀態
             onSnapshot(candidatesRef, (snapshot) => {
@@ -301,9 +343,29 @@
             }, (error) => {
                 console.error("Vacancies Sync Error:", error);
             });
+
+            // 監聽部門編制
+            onSnapshot(departmentsRef, (snapshot) => {
+                let depts = [];
+                snapshot.forEach(doc => {
+                    depts.push(doc.data());
+                });
+
+                if (depts.length === 0 && window.state.departments.length === DEFAULT_DEPARTMENTS.length) {
+                    DEFAULT_DEPARTMENTS.forEach(async (d) => {
+                        await window.dbSetDepartment(d);
+                    });
+                    return;
+                }
+
+                window.state.departments = depts.sort((a,b) => a.id.localeCompare(b.id));
+                window.renderApp();
+            }, (error) => {
+                console.error("Departments Sync Error:", error);
+            });
         }
 
-        // 綁定全域還原 Excel 模擬資料庫方法
+        // 綁定全域還原 Excel 模擬資料庫方法 (包含部門)
         window.resetToExcelData = async function() {
             if (window.isFirebaseActive) {
                 window.showToast("正在重設雲端資料中...");
@@ -312,6 +374,12 @@
                 }
                 for (let v of window.state.vacancies) {
                     await window.dbDeleteVacancy(v.id);
+                }
+                for (let d of window.state.departments) {
+                    await window.dbDeleteDepartment(d.id);
+                }
+                for (let d of DEFAULT_DEPARTMENTS) {
+                    await window.dbSetDepartment(d);
                 }
                 for (let v of DEFAULT_VACANCIES) {
                     await window.dbSetVacancy(v);
@@ -323,6 +391,7 @@
             } else {
                 window.state.vacancies = JSON.parse(JSON.stringify(DEFAULT_VACANCIES));
                 window.state.candidates = JSON.parse(JSON.stringify(DEFAULT_CANDIDATES));
+                window.state.departments = JSON.parse(JSON.stringify(DEFAULT_DEPARTMENTS));
                 saveLocalState();
                 window.renderApp();
                 window.showToast("成功還原本地快取自 Excel 預設資料！");
@@ -1160,6 +1229,68 @@
     </script>
 
     <script>
+        // --- 新增：部門管理後台之全域邏輯 (新增與刪除部門) ---
+        window.handleAddDepartment = async function() {
+            const input = document.getElementById('new-dept-name');
+            if (!input) return;
+            const name = input.value.trim();
+            if (!name) {
+                window.showToast("請輸入部門名稱！", true);
+                return;
+            }
+            // 檢查重複
+            const exists = window.state.departments.some(d => d.name === name);
+            if (exists) {
+                window.showToast("此部門已存在於編制中！", true);
+                return;
+            }
+            const newDept = {
+                id: 'd_' + Date.now(),
+                name: name
+            };
+            
+            if (window.isFirebaseActive) {
+                await window.dbSetDepartment(newDept);
+            } else {
+                window.state.departments.push(newDept);
+                localStorage.setItem('recruit_departments', JSON.stringify(window.state.departments));
+                window.renderApp();
+            }
+            window.showToast(`成功新增部門編制：『${name}』`);
+            input.value = '';
+        }
+
+        window.handleDeleteDepartment = async function(id, name) {
+            // 檢查是否有現役職缺正在隸屬於該部門
+            const isUsed = window.state.vacancies.some(v => v.department === name);
+            if (isUsed) {
+                window.showToast(`無法刪除！已有現役職缺隸屬於『${name}』。`, true);
+                return;
+            }
+            
+            if (window.isFirebaseActive) {
+                await window.dbDeleteDepartment(id);
+            } else {
+                window.state.departments = window.state.departments.filter(d => d.id !== id);
+                localStorage.setItem('recruit_departments', JSON.stringify(window.state.departments));
+                window.renderApp();
+            }
+            window.showToast(`已成功刪除部門編制：『${name}』`);
+        }
+
+        // 動態產生職缺 Modal 中的部門選單選項
+        window.populateVacancyModalDeptSelect = function() {
+            const select = document.getElementById('form-vac-dept');
+            if (!select) return;
+            select.innerHTML = '';
+            window.state.departments.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d.name;
+                opt.textContent = d.name;
+                select.appendChild(opt);
+            });
+        }
+
         function renderSettingsPage(target) {
             let vacanciesCardsHtml = '';
             window.state.vacancies.forEach(v => {
@@ -1219,6 +1350,21 @@
                 `;
             });
 
+            // 動態生成部門管理清單
+            let deptsListHtml = '';
+            window.state.departments.forEach(d => {
+                deptsListHtml += `
+                    <div class="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 text-xs transition hover:bg-slate-100/70">
+                        <span class="font-semibold text-slate-700 flex items-center gap-1.5">
+                            <i class="fa-regular fa-folder text-indigo-400"></i> ${d.name}
+                        </span>
+                        <button onclick="handleDeleteDepartment('${d.id}', '${d.name}')" class="text-slate-400 hover:text-rose-600 transition p-1">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </div>
+                `;
+            });
+
             target.innerHTML = `
                 <!-- 後台說明與自訂金鑰指南 -->
                 <div class="bg-slate-900 text-white rounded-2xl shadow-md p-5 mb-6">
@@ -1237,24 +1383,50 @@
                     </div>
                 </div>
 
-                <!-- 職缺設定 -->
-                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
-                    <div class="flex justify-between items-center mb-4">
-                        <div class="flex items-center gap-2">
-                            <span class="bg-indigo-100 text-indigo-600 p-1.5 rounded-lg"><i class="fa-solid fa-sliders"></i></span>
-                            <h3 class="font-bold text-slate-800 text-sm">最新職缺設定、面試流程與人員分派後台</h3>
+                <!-- 雙欄架構：左側部門管理，右側職缺與流程設定 -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- 左側欄：部門編制管理 -->
+                    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm h-fit">
+                        <h4 class="font-bold text-slate-800 text-sm mb-2 flex items-center gap-1.5 text-indigo-700">
+                            <i class="fa-solid fa-building-user text-indigo-500"></i> 部門編制管理
+                        </h4>
+                        <p class="text-[11px] text-slate-400 mb-4">在此管理全公司開放招聘之部門。新增部門後，設定新職缺時即可進行關聯指派。</p>
+                        
+                        <!-- 新增部門表單 -->
+                        <div class="flex gap-2 mb-4">
+                            <input type="text" id="new-dept-name" placeholder="輸入新部門（如：客服部）" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <button onclick="handleAddDepartment()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-4 py-2 rounded-lg font-bold transition shadow-sm">
+                                新增
+                            </button>
                         </div>
-                        <button onclick="openVacancyModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition">
-                            <i class="fa-solid fa-plus"></i> 開放新職缺與流程
-                        </button>
-                    </div>
-                    <p class="text-xs text-slate-500">
-                        HR 可在此後台設定新增職缺，並規劃關卡（僅一次面試、或初試+複試兩關）。設定好預設主管與流程後，新增面試人員時系統將會自動帶入面試官資料。
-                    </p>
-                </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    ${vacanciesCardsHtml}
+                        <!-- 部門清單 -->
+                        <div class="space-y-1.5 max-h-[380px] overflow-y-auto custom-scrollbar pr-1">
+                            ${deptsListHtml}
+                        </div>
+                    </div>
+
+                    <!-- 右側欄：職缺設定 -->
+                    <div class="lg:col-span-2 space-y-6">
+                        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                            <div class="flex justify-between items-center mb-4">
+                                <div class="flex items-center gap-2">
+                                    <span class="bg-indigo-100 text-indigo-600 p-1.5 rounded-lg"><i class="fa-solid fa-sliders"></i></span>
+                                    <h3 class="font-bold text-slate-800 text-sm">最新職缺設定、面試流程與人員分派後台</h3>
+                                </div>
+                                <button onclick="openVacancyModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition">
+                                    <i class="fa-solid fa-plus"></i> 開放新職缺與流程
+                                </button>
+                            </div>
+                            <p class="text-xs text-slate-500">
+                                HR 可在此後台設定新增職缺，並規劃關卡（僅一次面試、或初試+複試兩關）。設定好預設主管與流程後，新增面試人員時系統將會自動帶入面試官資料。
+                            </p>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            ${vacanciesCardsHtml}
+                        </div>
+                    </div>
                 </div>
             `;
         }
@@ -1275,6 +1447,7 @@
 
         // 開啟/關閉新增職缺 Modal
         function openVacancyModal() {
+            populateVacancyModalDeptSelect(); // 動態填充部門選項
             document.getElementById('vacancy-form').reset();
             document.getElementById('form-vacancy-id').value = "";
             document.getElementById('vacancy-modal-title').innerText = "新增職缺與面試流程";
@@ -1334,6 +1507,8 @@
         function editVacancy(id) {
             const vac = window.state.vacancies.find(v => v.id === id);
             if (!vac) return;
+
+            populateVacancyModalDeptSelect(); // 動態填充部門選項
 
             document.getElementById('form-vacancy-id').value = vac.id;
             document.getElementById('form-vac-name').value = vac.name;
@@ -1605,14 +1780,7 @@
                     <div>
                         <label class="block text-xs font-semibold text-slate-500 mb-1">部門別 <span class="text-red-500">*</span></label>
                         <select id="form-vac-dept" required class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                            <option value="製造部">製造部</option>
-                            <option value="研發部">研發部</option>
-                            <option value="財務部">財務部</option>
-                            <option value="行銷部">行銷部</option>
-                            <option value="人資組">人資組</option>
-                            <option value="行政管理部">行政管理部</option>
-                            <option value="物流部">物流部</option>
-                            <option value="出貨部">出貨部</option>
+                            <!-- 動態填充部門編制 -->
                         </select>
                     </div>
                     <div>
