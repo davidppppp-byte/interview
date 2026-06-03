@@ -1,0 +1,1748 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartRecruit 智慧面試流程與場地管理系統</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 FontAwesome 圖示 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <script type="module">
+        // 導入 Firebase JS SDK (v11.6.1)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Firebase 您的專屬環境配置（已徹底清除特殊不換行空白，改用標準空格） ---
+        const userFirebaseConfig = {
+            apiKey: "AIzaSyD6BMKxE8paDpW2qPiFwvLRGq3rJEKKkr0",
+            authDomain: "interview-c3631.firebaseapp.com",
+            projectId: "interview-c3631",
+            storageBucket: "interview-c3631.firebasestorage.app",
+            messagingSenderId: "470971117318",
+            appId: "1:470971117318:web:16c6da2fc7e949dc817887"
+        };
+
+        const activeAppId = 'smartrecruit-interview';
+
+        // 全域控制變數
+        window.isFirebaseActive = false; 
+        window.firebaseConnectionStatus = 'connecting';
+        window.appId = activeAppId;
+
+        // 預設資料庫範本 (完美對應您的「面試人員與流程.xlsx」)
+        const DEFAULT_VACANCIES = [
+            { id: "v1", name: "作業員", department: "製造部", steps: ["初審", "一次面試", "錄取"], interviewers: ["潘哥、全恩"] },
+            { id: "v2", name: "研發專員", department: "研發部", steps: ["初審", "一次面試", "錄取"], interviewers: ["潘哥、全恩、偉銨"] },
+            { id: "v3", name: "會計專員", department: "財務部", steps: ["初審", "一次面試", "二次面試", "錄取"], interviewers: ["依姝、立言", "潘哥、重恩"] },
+            { id: "v4", name: "社群小編", department: "行銷部", steps: ["初審", "一次面試", "二次面試", "錄取"], interviewers: ["夢涵、立言", "潘哥、重恩"] },
+            { id: "v5", name: "人資資深專員", department: "人資組", steps: ["初審", "一次面試", "二次面釋", "錄取"], interviewers: ["立言", "潘哥、重恩"] },
+            { id: "v6", name: "採購專員", department: "行政管理部", steps: ["初審", "一次面試", "二次面試", "錄取"], interviewers: ["重恩", "潘哥"] }
+        ];
+
+        const DEFAULT_CANDIDATES = [
+            {
+                id: "c1",
+                name: "陳小明",
+                vacancyId: "v3", // 會計專員
+                phone: "0912-345678",
+                location: "北屯總部",
+                stage: "一次面試",
+                status: "面試通過",
+                interviewer: "依姝、立言",
+                dateTime: "2026-06-01T14:00",
+                note: "專業測驗高分，溝通態度優良，建議安排潘哥與重恩進行複試。",
+                secondInterviewer: "潘哥、重恩",
+                secondDateTime: "2026-06-04T10:30",
+                secondLocation: "北屯總部",
+                secondStatus: "已確認"
+            },
+            {
+                id: "c2",
+                name: "林志強",
+                vacancyId: "v1", // 作業員
+                phone: "0923-456789",
+                location: "生產中心",
+                stage: "一次面試",
+                status: "待面試",
+                interviewer: "潘哥、全恩",
+                dateTime: "2026-06-03T10:00",
+                note: "具有製造業相關經驗，期待面試表現。",
+                secondInterviewer: "",
+                secondDateTime: "",
+                secondLocation: "",
+                secondStatus: ""
+            },
+            {
+                id: "c3",
+                name: "張美玲",
+                vacancyId: "v4", // 社群小編
+                phone: "0934-567890",
+                location: "崇德門市",
+                stage: "一次面試",
+                status: "未通過",
+                interviewer: "夢涵、立言",
+                dateTime: "2026-06-01T11:00",
+                note: "目前期望排班時間與門市需求不符。",
+                secondInterviewer: "",
+                secondDateTime: "",
+                secondLocation: "",
+                secondStatus: ""
+            },
+            {
+                id: "c4",
+                name: "王大同",
+                vacancyId: "v6", // 採購專員
+                phone: "0945-678901",
+                location: "北屯總部",
+                stage: "二次面試",
+                status: "面試通過",
+                interviewer: "重恩",
+                dateTime: "2026-05-30T15:30",
+                note: "電腦測驗優異，溝通敏捷。",
+                secondInterviewer: "潘哥",
+                secondDateTime: "2026-06-05T15:00",
+                secondLocation: "北屯總部",
+                secondStatus: "已確認"
+            },
+            {
+                id: "c5",
+                name: "李國華",
+                vacancyId: "v5", // 人資資深專員
+                phone: "0956-789012",
+                location: "北屯總部",
+                stage: "一次面試",
+                status: "面試通過",
+                interviewer: "立言",
+                dateTime: "2026-06-02T09:30",
+                note: "專業招募經驗豐富，建議執行長與重恩複試。",
+                secondInterviewer: "潘哥、重恩",
+                secondDateTime: "",
+                secondLocation: "北屯總部",
+                secondStatus: "待排程"
+            }
+        ];
+
+        // 系統執行時期 State
+        window.state = {
+            vacancies: JSON.parse(localStorage.getItem('recruit_vacancies')) || DEFAULT_VACANCIES,
+            candidates: JSON.parse(localStorage.getItem('recruit_candidates')) || DEFAULT_CANDIDATES,
+            activeTab: 'dashboard',
+            filters: {
+                location: 'All',
+                vacancy: 'All',
+                status: 'All'
+            }
+        };
+
+        // 初始化 Firebase 連線
+        async function initializeDatabase() {
+            try {
+                // 初始化 App 與服務
+                const app = initializeApp(userFirebaseConfig);
+                const db = getFirestore(app);
+                const auth = getAuth(app);
+
+                // 匿名登入
+                const userCred = await signInAnonymously(auth);
+                const currentUser = userCred.user;
+
+                if (!currentUser) {
+                    setupLocalFallbackMode("Firebase 登入失敗");
+                    return;
+                }
+
+                window.isFirebaseActive = true;
+                window.firebaseConnectionStatus = 'connected';
+                window.db = db;
+                window.auth = auth;
+
+                // 綁定資料庫寫入 API
+                window.dbSetCandidate = async (cand) => {
+                    if (!auth.currentUser) return;
+                    await setDoc(doc(db, 'artifacts', window.appId, 'public', 'data', 'candidates', cand.id), cand);
+                };
+
+                window.dbDeleteCandidate = async (candId) => {
+                    if (!auth.currentUser) return;
+                    await deleteDoc(doc(db, 'artifacts', window.appId, 'public', 'data', 'candidates', candId));
+                };
+
+                window.dbSetVacancy = async (vac) => {
+                    if (!auth.currentUser) return;
+                    await setDoc(doc(db, 'artifacts', window.appId, 'public', 'data', 'vacancies', vac.id), vac);
+                };
+
+                window.dbDeleteVacancy = async (vacId) => {
+                    if (!auth.currentUser) return;
+                    await deleteDoc(doc(db, 'artifacts', window.appId, 'public', 'data', 'vacancies', vacId));
+                };
+
+                // 設定即時同步
+                setupRealtimeSync(db);
+
+            } catch (err) {
+                console.warn("Firebase 連線失敗，改為本機快取模式：", err);
+                setupLocalFallbackMode("Firebase 連線失敗，切換至本機快取。");
+            }
+        }
+
+        // 本機快取備援方案
+        function setupLocalFallbackMode(message) {
+            window.isFirebaseActive = false;
+            window.firebaseConnectionStatus = 'localMode';
+            
+            window.dbSetCandidate = async (cand) => {
+                const idx = window.state.candidates.findIndex(c => c.id === cand.id);
+                if (idx !== -1) window.state.candidates[idx] = cand;
+                else window.state.candidates.push(cand);
+                saveLocalState();
+                window.renderApp();
+            };
+
+            window.dbDeleteCandidate = async (candId) => {
+                window.state.candidates = window.state.candidates.filter(c => c.id !== candId);
+                saveLocalState();
+                window.renderApp();
+            };
+
+            window.dbSetVacancy = async (vac) => {
+                const idx = window.state.vacancies.findIndex(v => v.id === vac.id);
+                if (idx !== -1) window.state.vacancies[idx] = vac;
+                else window.state.vacancies.push(vac);
+                saveLocalState();
+                window.renderApp();
+            };
+
+            window.dbDeleteVacancy = async (vacId) => {
+                window.state.vacancies = window.state.vacancies.filter(v => v.id !== vacId);
+                saveLocalState();
+                window.renderApp();
+            };
+
+            window.renderApp();
+            setTimeout(() => {
+                window.showToast(message, true);
+            }, 1000);
+        }
+
+        function saveLocalState() {
+            localStorage.setItem('recruit_vacancies', JSON.stringify(window.state.vacancies));
+            localStorage.setItem('recruit_candidates', JSON.stringify(window.state.candidates));
+        }
+
+        // 設定資料即時同步監聽
+        function setupRealtimeSync(db) {
+            const candidatesRef = collection(db, 'artifacts', window.appId, 'public', 'data', 'candidates');
+            const vacanciesRef = collection(db, 'artifacts', window.appId, 'public', 'data', 'vacancies');
+
+            // 監聽面試者狀態
+            onSnapshot(candidatesRef, (snapshot) => {
+                let candidates = [];
+                snapshot.forEach(doc => {
+                    candidates.push(doc.data());
+                });
+
+                if (candidates.length === 0 && window.state.candidates.length === DEFAULT_CANDIDATES.length) {
+                    DEFAULT_CANDIDATES.forEach(async (c) => {
+                        await window.dbSetCandidate(c);
+                    });
+                    return;
+                }
+
+                window.state.candidates = candidates;
+                window.renderApp();
+            }, (error) => {
+                console.error("Candidates Sync Error:", error);
+                setupLocalFallbackMode("資料庫同步失敗");
+            });
+
+            // 監聽職缺設定
+            onSnapshot(vacanciesRef, (snapshot) => {
+                let vacancies = [];
+                snapshot.forEach(doc => {
+                    vacancies.push(doc.data());
+                });
+
+                if (vacancies.length === 0 && window.state.vacancies.length === DEFAULT_VACANCIES.length) {
+                    DEFAULT_VACANCIES.forEach(async (v) => {
+                        await window.dbSetVacancy(v);
+                    });
+                    return;
+                }
+
+                window.state.vacancies = vacancies;
+                window.renderApp();
+            }, (error) => {
+                console.error("Vacancies Sync Error:", error);
+            });
+        }
+
+        // 綁定全域還原 Excel 模擬資料庫方法
+        window.resetToExcelData = async function() {
+            if (window.isFirebaseActive) {
+                window.showToast("正在重設雲端資料中...");
+                for (let c of window.state.candidates) {
+                    await window.dbDeleteCandidate(c.id);
+                }
+                for (let v of window.state.vacancies) {
+                    await window.dbDeleteVacancy(v.id);
+                }
+                for (let v of DEFAULT_VACANCIES) {
+                    await window.dbSetVacancy(v);
+                }
+                for (let c of DEFAULT_CANDIDATES) {
+                    await window.dbSetCandidate(c);
+                }
+                window.showToast("成功還原雲端資料庫自 Excel 預設資料！");
+            } else {
+                window.state.vacancies = JSON.parse(JSON.stringify(DEFAULT_VACANCIES));
+                window.state.candidates = JSON.parse(JSON.stringify(DEFAULT_CANDIDATES));
+                saveLocalState();
+                window.renderApp();
+                window.showToast("成功還原本地快取自 Excel 預設資料！");
+            }
+        }
+
+        // 啟動連線
+        initializeDatabase();
+    </script>
+
+    <header class="bg-slate-900 text-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap justify-between items-center gap-4">
+            <!-- 標題 -->
+            <div class="flex items-center space-x-3">
+                <div class="bg-indigo-600 p-2.5 rounded-lg text-white shadow-inner flex items-center justify-center">
+                    <i class="fa-solid fa-people-arrows text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg tracking-wide">SmartRecruit</h1>
+                    <p class="text-xs text-slate-400">智慧面試流程與場地管理系統</p>
+                </div>
+            </div>
+
+            <!-- 右側動作與雲端連線狀態 -->
+            <div class="flex items-center space-x-3">
+                <!-- 資料庫狀態 -->
+                <div id="db-status-pill" class="px-3 py-1 text-xs rounded-full border flex items-center gap-1.5 font-medium transition-all duration-300 bg-slate-800 text-slate-400 border-slate-700">
+                    <span class="w-2 h-2 rounded-full bg-slate-500 animate-pulse"></span>
+                    <span>雲端資料載入中</span>
+                </div>
+
+                <div class="h-6 w-px bg-slate-700"></div>
+                
+                <button onclick="window.resetToExcelData()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3.5 py-2 rounded-lg font-medium shadow flex items-center gap-1.5 transition">
+                    <i class="fa-regular fa-file-excel text-sm"></i>
+                    <span>還原 Excel 模擬數據</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex-1 max-w-7xl w-full mx-auto px-4 py-6 flex flex-col md:flex-row gap-6">
+        <!-- 側邊選單 -->
+        <aside class="w-full md:w-64 shrink-0 flex flex-col gap-4">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+                <p class="text-xs font-bold text-slate-400 tracking-wider uppercase mb-3">功能導覽</p>
+                <nav class="space-y-1" id="sidebar-nav">
+                    <button onclick="navigate('dashboard')" id="nav-dashboard" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-semibold rounded-lg transition bg-indigo-50 text-indigo-700 border-l-4 border-indigo-600">
+                        <span class="flex items-center gap-2.5">
+                            <i class="fa-solid fa-chart-pie text-indigo-500"></i>
+                            <span>首頁儀表板</span>
+                        </span>
+                        <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full" id="badge-total">0</span>
+                    </button>
+
+                    <button onclick="navigate('candidates')" id="nav-candidates" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition text-slate-700 hover:bg-slate-100 border-l-4 border-transparent">
+                        <span class="flex items-center gap-2.5">
+                            <i class="fa-solid fa-users text-indigo-500"></i>
+                            <span>面試人員管理</span>
+                        </span>
+                        <span class="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-full" id="badge-pending">0</span>
+                    </button>
+
+                    <button onclick="navigate('second-interview')" id="nav-second-interview" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition text-slate-700 hover:bg-slate-100 border-l-4 border-transparent">
+                        <span class="flex items-center gap-2.5">
+                            <i class="fa-solid fa-calendar-check text-indigo-500"></i>
+                            <span>二次面試確認區</span>
+                        </span>
+                        <span class="bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-full animate-pulse" id="badge-second">0</span>
+                    </button>
+
+                    <button onclick="navigate('settings')" id="nav-settings" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition text-slate-700 hover:bg-slate-100 border-l-4 border-transparent">
+                        <span class="flex items-center gap-2.5">
+                            <i class="fa-solid fa-sliders text-indigo-500"></i>
+                            <span>後台與流程設定</span>
+                        </span>
+                        <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full" id="badge-vacancies">0</span>
+                    </button>
+                </nav>
+            </div>
+
+            <!-- 系統資訊卡 -->
+            <div class="bg-slate-900 text-slate-300 rounded-xl p-4 shadow-sm text-xs space-y-3">
+                <div class="flex items-center gap-2 text-amber-400 font-bold">
+                    <i class="fa-regular fa-lightbulb text-sm"></i>
+                    <span>Firebase 多人協作</span>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                    本系統支援雲端即時同步。當人資或執行長更改面試狀態時，系統會同步至所有開啟網頁的裝置，不需重新整理。
+                </p>
+                <div class="pt-2 border-t border-slate-800 flex justify-between text-[10px] text-slate-500">
+                    <span>雙模支援版</span>
+                    <span>v2.5-Live</span>
+                </div>
+            </div>
+        </aside>
+
+        <main class="flex-1 min-w-0">
+            <!-- 篩選列 -->
+            <div id="filter-bar" class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6 flex flex-wrap gap-4 items-center justify-between">
+                <div class="flex flex-wrap items-center gap-3">
+                    <span class="text-xs font-bold text-slate-400 uppercase tracking-wider"><i class="fa-solid fa-filter mr-1"></i> 快速篩選:</span>
+                    
+                    <!-- 場地篩選 -->
+                    <div>
+                        <select onchange="updateFilter('location', this.value)" id="filter-location" class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="All">所有場地 (全部)</option>
+                            <option value="生產中心">生產中心</option>
+                            <option value="物流中心">物流中心</option>
+                            <option value="北屯總部">北屯總部</option>
+                            <option value="崇德門市">崇德門市</option>
+                        </select>
+                    </div>
+
+                    <!-- 職缺篩選 -->
+                    <div>
+                        <select onchange="updateFilter('vacancy', this.value)" id="filter-vacancy" class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="All">所有職缺</option>
+                        </select>
+                    </div>
+
+                    <!-- 狀態篩選 -->
+                    <div>
+                        <select onchange="updateFilter('status', this.value)" id="filter-status" class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="All">所有狀態</option>
+                            <option value="待面試">待面試</option>
+                            <option value="面試通過">面試通過</option>
+                            <option value="未通過">未通過</option>
+                            <option value="已確認">二次面試確認</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 搜尋 -->
+                <div class="relative w-full md:w-auto">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+                    <input type="text" id="search-candidate" oninput="searchCandidate(this.value)" placeholder="搜尋候選人姓名..." class="pl-9 pr-4 py-1.5 w-full md:w-64 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+            </div>
+
+            <!-- 本地備份模式警示條 -->
+            <div id="local-mode-alert" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-start gap-3">
+                <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 text-lg"></i>
+                <div class="text-xs text-amber-800 leading-relaxed">
+                    <strong>目前運作於：【本機快取模擬模式】</strong><br>
+                    若發現無連上雲端，請於「後台與流程設定」確認您的 Firebase 金鑰設定。
+                </div>
+            </div>
+
+            <!-- 動態分頁注入點 -->
+            <div id="main-content-target"></div>
+        </main>
+    </div>
+
+    <script>
+        let searchQuery = '';
+
+        // 日期時間格式化工具
+        function formatDateTime(dateTimeStr) {
+            if (!dateTimeStr) return '未排定';
+            try {
+                const dt = new Date(dateTimeStr);
+                if (isNaN(dt.getTime())) return dateTimeStr;
+                const y = dt.getFullYear();
+                const m = String(dt.getMonth() + 1).padStart(2, '0');
+                const d = String(dt.getDate()).padStart(2, '0');
+                const hr = String(dt.getHours()).padStart(2, '0');
+                const min = String(dt.getMinutes()).padStart(2, '0');
+                return `${y}-${m}-${d} ${hr}:${min}`;
+            } catch (e) {
+                return dateTimeStr;
+            }
+        }
+
+        // 搜尋處理
+        function searchCandidate(val) {
+            searchQuery = val.trim().toLowerCase();
+            renderContent();
+        }
+
+        // 導覽分頁切換
+        function navigate(tabId) {
+            window.state.activeTab = tabId;
+            const buttons = document.querySelectorAll('#sidebar-nav button');
+            buttons.forEach(btn => {
+                btn.className = "w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition text-slate-700 hover:bg-slate-100 border-l-4 border-transparent";
+            });
+            const activeBtn = document.getElementById(`nav-${tabId}`);
+            if (activeBtn) {
+                activeBtn.className = "w-full flex items-center justify-between px-3 py-2.5 text-sm font-semibold rounded-lg transition bg-indigo-50 text-indigo-700 border-l-4 border-indigo-600";
+            }
+            renderApp();
+        }
+
+        // 更新 UI 頂端連線狀態與 Badges 
+        function updateBadges() {
+            const statusPill = document.getElementById('db-status-pill');
+            const alertBox = document.getElementById('local-mode-alert');
+            if (statusPill) {
+                if (window.firebaseConnectionStatus === 'connected') {
+                    statusPill.className = "px-3 py-1 text-xs rounded-full border flex items-center gap-1.5 font-medium transition-all duration-300 bg-emerald-500/15 text-emerald-600 border-emerald-500/30";
+                    statusPill.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span> 雲端連線中 (即時同步)`;
+                    if (alertBox) alertBox.classList.add('hidden');
+                } else if (window.firebaseConnectionStatus === 'localMode') {
+                    statusPill.className = "px-3 py-1 text-xs rounded-full border flex items-center gap-1.5 font-medium transition-all duration-300 bg-amber-500/15 text-amber-600 border-amber-500/30";
+                    statusPill.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500"></span> 本地快取模式`;
+                    if (alertBox) alertBox.classList.remove('hidden');
+                } else {
+                    statusPill.className = "px-3 py-1 text-xs rounded-full border flex items-center gap-1.5 font-medium transition-all duration-300 bg-slate-800 text-slate-400 border-slate-700";
+                    statusPill.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-500 animate-pulse"></span> 雲端資料載入中`;
+                }
+            }
+
+            const total = window.state.candidates.length;
+            const pending = window.state.candidates.filter(c => c.status === '待面試').length;
+            const secondPending = window.state.candidates.filter(c => {
+                const vac = window.state.vacancies.find(v => v.id === c.vacancyId);
+                const hasSecondStep = vac ? vac.steps.includes("二次面試") : false;
+                return (c.status === '面試通過' || c.status === '通過') && hasSecondStep && (c.secondStatus === '未排程' || c.secondStatus === '待排程');
+            }).length;
+
+            document.getElementById('badge-total').innerText = total;
+            document.getElementById('badge-pending').innerText = pending;
+            document.getElementById('badge-second').innerText = secondPending;
+            document.getElementById('badge-vacancies').innerText = window.state.vacancies.length;
+        }
+
+        // 動態填充職缺篩選
+        function updateVacancyFilterDropdown() {
+            const select = document.getElementById('filter-vacancy');
+            if (!select) return;
+            const currentVal = window.state.filters.vacancy;
+            select.innerHTML = '<option value="All">所有職缺</option>';
+            window.state.vacancies.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v.id;
+                opt.textContent = `${v.name} (${v.department})`;
+                if (v.id === currentVal) opt.selected = true;
+                select.appendChild(opt);
+            });
+        }
+
+        // 篩選條件過濾資料
+        function getFilteredCandidates() {
+            return window.state.candidates.filter(c => {
+                if (window.state.filters.location !== 'All') {
+                    const locMatch = c.location === window.state.filters.location || (c.secondLocation === window.state.filters.location);
+                    if (!locMatch) return false;
+                }
+                if (window.state.filters.vacancy !== 'All' && c.vacancyId !== window.state.filters.vacancy) {
+                    return false;
+                }
+                if (window.state.filters.status !== 'All') {
+                    if (window.state.filters.status === '已確認' && c.secondStatus !== '已確認') return false;
+                    if (window.state.filters.status === '面試通過' && (c.status !== '面試通過' && c.status !== '通過')) return false;
+                    if (window.state.filters.status !== '已確認' && window.state.filters.status !== '面試通過' && c.status !== window.state.filters.status) return false;
+                }
+                if (searchQuery) {
+                    const nameMatch = c.name.toLowerCase().includes(searchQuery);
+                    const phoneMatch = c.phone && c.phone.includes(searchQuery);
+                    if (!nameMatch && !phoneMatch) return false;
+                }
+                return true;
+            });
+        }
+
+        // 快速更新過濾器
+        function updateFilter(key, val) {
+            window.state.filters[key] = val;
+            renderApp();
+        }
+
+        function renderContent() {
+            const target = document.getElementById('main-content-target');
+            if (!target) return;
+            const list = getFilteredCandidates();
+
+            if (window.state.activeTab === 'dashboard') {
+                renderDashboard(target, list);
+            } else if (window.state.activeTab === 'candidates') {
+                renderCandidatesPage(target, list);
+            } else if (window.state.activeTab === 'second-interview') {
+                renderSecondInterviewPage(target);
+            } else if (window.state.activeTab === 'settings') {
+                renderSettingsPage(target);
+            }
+        }
+    </script>
+
+    <script>
+        function renderDashboard(target, list) {
+            const totalCount = list.length;
+            const waitCount = list.filter(c => c.status === '待面試').length;
+            const passCount = list.filter(c => c.status === '面試通過' || c.status === '通過' || c.secondStatus === '已確認').length;
+            
+            const todayStr = new Date().toISOString().slice(0, 10);
+            const upcomingInterviews = list.filter(c => {
+                const datePart = c.dateTime ? c.dateTime.slice(0, 10) : "";
+                const secDatePart = c.secondDateTime ? c.secondDateTime.slice(0, 10) : "";
+                return datePart >= todayStr || secDatePart >= todayStr;
+            }).sort((a,b) => (a.dateTime || "").localeCompare(b.dateTime || ""));
+
+            // 1. 生成「即將到來的行程與場地分配」HTML
+            let upcomingHtml = '';
+            if (upcomingInterviews.length === 0) {
+                upcomingHtml = `
+                    <div class="py-8 text-center text-slate-400 text-xs">
+                        <i class="fa-solid fa-calendar-minus text-3xl mb-2 block"></i>
+                        目前無即將到來的面試行程
+                    </div>
+                `;
+            } else {
+                let cardsStr = '';
+                upcomingInterviews.forEach(c => {
+                    const vac = window.state.vacancies.find(v => v.id === c.vacancyId);
+                    const isSecond = (c.status === '面試通過' || c.status === '通過' || c.status === '面釋通過') && c.secondStatus === '已確認';
+                    
+                    const cardBg = isSecond ? 'border-indigo-100 bg-indigo-50/40' : 'border-slate-100 bg-slate-50';
+                    const badgeText = isSecond ? '二次面試 (複試)' : '初次面試 (初試)';
+                    const badgeColor = isSecond ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-700';
+                    const locationLabel = isSecond ? c.secondLocation : c.location;
+                    const interviewerLabel = isSecond ? c.secondInterviewer : c.interviewer;
+                    const timeLabel = formatDateTime(isSecond ? c.secondDateTime : c.dateTime);
+                    const vacName = vac ? vac.name : '未知職缺';
+
+                    cardsStr += `
+                        <div class="border ${cardBg} rounded-xl p-4 flex flex-col justify-between">
+                            <div>
+                                <div class="flex justify-between items-start mb-2">
+                                    <span class="px-2.5 py-1 text-[11px] font-bold rounded-md ${badgeColor}">
+                                        ${badgeText}
+                                    </span>
+                                    <span class="text-xs text-slate-400 font-medium flex items-center gap-1">
+                                        <i class="fa-solid fa-location-dot text-rose-500"></i> 
+                                        <strong class="text-slate-700">${locationLabel}</strong>
+                                    </span>
+                                </div>
+                                <h4 class="font-bold text-slate-800 text-sm mb-1">${c.name} <span class="text-xs font-normal text-slate-500">應徵 ${vacName}</span></h4>
+                                <p class="text-xs text-slate-500 flex items-center gap-1.5 mt-2">
+                                    <i class="fa-regular fa-clock"></i>
+                                    <span>時間: <strong>${timeLabel}</strong></span>
+                                </p>
+                                <p class="text-xs text-slate-500 flex items-center gap-1.5 mt-1">
+                                    <i class="fa-solid fa-user-tie"></i>
+                                    <span>面試官: <strong>${interviewerLabel}</strong></span>
+                                </p>
+                            </div>
+                            <div class="mt-3 pt-3 border-t border-slate-200/50 flex justify-between items-center">
+                                <span class="text-[11px] text-slate-400">聯絡電話: ${c.phone || '無'}</span>
+                                <button onclick="navigate('candidates')" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1">
+                                    <span>查看或評估</span> <i class="fa-solid fa-arrow-right text-[10px]"></i>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+                upcomingHtml = `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">${cardsStr}</div>`;
+            }
+
+            // 2. 生成「最新面試進度大表」的行 HTML
+            let rowsHtml = '';
+            if (list.length === 0) {
+                rowsHtml = `
+                    <tr>
+                        <td colspan="7" class="py-8 text-center text-slate-400">沒有符合當前篩選條件的面試者</td>
+                    </tr>
+                `;
+            } else {
+                list.forEach(c => {
+                    const vac = window.state.vacancies.find(v => v.id === c.vacancyId);
+                    const hasSecond = vac ? vac.steps.includes("二次面試") : false;
+                    
+                    let statusBadge = "";
+                    if (c.status === "待面試") {
+                        statusBadge = `<span class="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-semibold">初試待面試</span>`;
+                    } else if (c.status === "未通過") {
+                        statusBadge = `<span class="px-2 py-0.5 bg-slate-100 text-slate-400 rounded-full font-semibold">未錄取</span>`;
+                    } else if ((c.status === "面試通過" || c.status === "通過" || c.status === "面釋通過") && c.secondStatus === "待排程") {
+                        statusBadge = `<span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full font-semibold">二試待排程</span>`;
+                    } else if ((c.status === "面釋通過" || c.status === "面試通過" || c.status === "通過") && c.secondStatus === "已確認") {
+                        statusBadge = `<span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full font-semibold">二試已排程</span>`;
+                    } else if ((c.status === "面試通過" || c.status === "通過" || c.status === "面釋通過") && !hasSecond) {
+                        statusBadge = `<span class="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-semibold">錄取確認</span>`;
+                    }
+
+                    let secondColHtml = '';
+                    if (hasSecond) {
+                        if (c.secondStatus === '聯絡中' || c.secondStatus === '待排程') {
+                            secondColHtml = `<span class="text-amber-600 font-medium">1面通過，待排程二試</span>`;
+                        } else if (c.secondStatus === '已確認') {
+                            secondColHtml = `
+                                <div class="text-indigo-700 font-medium">面試官: <strong>${c.secondInterviewer}</strong></div>
+                                <div class="text-[10px] text-slate-400 mt-0.5">${formatDateTime(c.secondDateTime)} (${c.secondLocation})</div>
+                            `;
+                        } else {
+                            secondColHtml = `<span class="text-slate-400 italic">待確認與安排</span>`;
+                        }
+                    } else {
+                        secondColHtml = `<span class="text-slate-300 italic">無二次流程</span>`;
+                    }
+
+                    const vacancyName = vac ? vac.name : '未知職缺';
+                    const departmentName = vac ? vac.department : '無';
+
+                    rowsHtml += `
+                        <tr class="hover:bg-slate-50/80 transition-colors">
+                            <td class="py-3.5 px-4">
+                                <div class="font-bold text-slate-800">${vacancyName}</div>
+                                <div class="text-[10px] text-slate-400 mt-0.5">${departmentName}</div>
+                            </td>
+                            <td class="py-3.5 px-4">
+                                <div class="font-bold text-slate-800">${c.name}</div>
+                                <div class="text-[10px] text-slate-400 mt-0.5">${c.phone || '無電話'}</div>
+                            </td>
+                            <td class="py-3.5 px-4 font-medium text-rose-600">
+                                <i class="fa-solid fa-location-dot text-[10px] mr-1"></i>${c.location}
+                            </td>
+                            <td class="py-3.5 px-4">
+                                <div class="text-slate-700">面試官: <strong>${c.interviewer}</strong></div>
+                                <div class="text-[10px] text-slate-400 mt-0.5">${formatDateTime(c.dateTime)}</div>
+                            </td>
+                            <td class="py-3.5 px-4">
+                                ${secondColHtml}
+                            </td>
+                            <td class="py-3.5 px-4 text-center">${statusBadge}</td>
+                            <td class="py-3.5 px-4 text-center">
+                                <button onclick="editCandidate('${c.id}')" class="text-indigo-600 hover:text-indigo-900 font-medium mr-2">編輯</button>
+                                <button onclick="deleteCandidate('${c.id}')" class="text-red-500 hover:text-red-700 font-medium">刪除</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+
+            target.innerHTML = `
+                <!-- 統計卡片 -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div class="bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-2xl p-4 text-white shadow-sm flex items-center justify-between">
+                        <div>
+                            <span class="text-xs text-indigo-100 font-medium block">目前面試人員總數</span>
+                            <span class="text-3xl font-bold mt-1 block">${totalCount} <span class="text-xs font-normal">人</span></span>
+                        </div>
+                        <div class="bg-white/10 p-3 rounded-xl"><i class="fa-solid fa-users text-2xl"></i></div>
+                    </div>
+                    
+                    <div class="bg-gradient-to-br from-amber-500 to-amber-600 rounded-2xl p-4 text-white shadow-sm flex items-center justify-between">
+                        <div>
+                            <span class="text-xs text-amber-100 font-medium block">待初次面試人數</span>
+                            <span class="text-3xl font-bold mt-1 block">${waitCount} <span class="text-xs font-normal">人</span></span>
+                        </div>
+                        <div class="bg-white/10 p-3 rounded-xl"><i class="fa-solid fa-hourglass-half text-2xl"></i></div>
+                    </div>
+
+                    <div class="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-2xl p-4 text-white shadow-sm flex items-center justify-between">
+                        <div>
+                            <span class="text-xs text-emerald-100 font-medium block">面試通過 / 二試確認中</span>
+                            <span class="text-3xl font-bold mt-1 block">${passCount} <span class="text-xs font-normal">人</span></span>
+                        </div>
+                        <div class="bg-white/10 p-3 rounded-xl"><i class="fa-solid fa-square-check text-2xl"></i></div>
+                    </div>
+                </div>
+
+                <!-- 行程與場地分配卡 -->
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
+                    <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                        <div class="flex items-center gap-2">
+                            <span class="bg-rose-100 text-rose-600 p-1.5 rounded-lg"><i class="fa-regular fa-calendar-days"></i></span>
+                            <h3 class="font-bold text-slate-800 text-sm">即將到來的面試行程與場地分配</h3>
+                        </div>
+                        <span class="text-xs text-slate-400">雲端即時排程</span>
+                    </div>
+                    ${upcomingHtml}
+                </div>
+
+                <!-- 最新面試進度大表 -->
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="flex justify-between items-center p-5 border-b border-slate-100">
+                        <div class="flex items-center gap-2">
+                            <span class="bg-indigo-100 text-indigo-600 p-1.5 rounded-lg"><i class="fa-solid fa-bars-staggered"></i></span>
+                            <h3 class="font-bold text-slate-800 text-sm">最新面試職缺、名字、面試官、流程與階段</h3>
+                        </div>
+                        <button onclick="openCandidateModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition">
+                            <i class="fa-solid fa-plus"></i> 新增面試排程
+                        </button>
+                    </div>
+
+                    <div class="overflow-x-auto custom-scrollbar">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr class="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider">
+                                    <th class="py-3 px-4">應徵職缺 (部門)</th>
+                                    <th class="py-3 px-4">面試人員 (名字/電話)</th>
+                                    <th class="py-3 px-4">面試場地</th>
+                                    <th class="py-3 px-4">第一階段 (面試官/時間)</th>
+                                    <th class="py-3 px-4">第二階段複試</th>
+                                    <th class="py-3 px-4 text-center">目前進度與狀態</th>
+                                    <th class="py-3 px-4 text-center">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                ${rowsHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+    </script>
+
+    <script>
+        function renderCandidatesPage(target, list) {
+            let cardsHtml = '';
+            if (list.length === 0) {
+                cardsHtml = `
+                    <div class="col-span-2 py-12 text-center text-slate-400 text-xs">
+                        目前無符合篩選條件的面試人員
+                    </div>
+                `;
+            } else {
+                list.forEach(c => {
+                    const vac = window.state.vacancies.find(v => v.id === c.vacancyId);
+                    
+                    let borderClass = "border-slate-200";
+                    if (c.status === "待面試") {
+                        borderClass = "border-amber-200 bg-amber-50/10";
+                    } else if (c.status === "面試通過" || c.status === "通過" || c.status === "面釋通過") {
+                        borderClass = "border-emerald-200 bg-emerald-50/10";
+                    } else if (c.status === "未通過") {
+                        borderClass = "border-slate-200 bg-slate-50/50";
+                    }
+
+                    const vacName = vac ? vac.name : '未知職缺';
+                    const timeLabel = formatDateTime(c.dateTime);
+                    const noteContent = c.note || '尚無備註或初試評語';
+
+                    cardsHtml += `
+                        <div class="bg-white border ${borderClass} rounded-xl p-4 flex flex-col justify-between shadow-sm">
+                            <div>
+                                <div class="flex justify-between items-start mb-2">
+                                    <div>
+                                        <span class="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] rounded-md font-bold">
+                                            ${vacName}
+                                        </span>
+                                        <span class="ml-1 text-[10px] text-slate-400">一試主管: ${c.interviewer}</span>
+                                    </div>
+                                    <span class="text-xs font-semibold ${c.status === '面試通過' || c.status === '通過' || c.status === '面釋通過' ? 'text-emerald-600' : c.status === '未通過' ? 'text-red-500' : 'text-amber-600'}">
+                                        狀態：${c.status}
+                                    </span>
+                                </div>
+
+                                <div class="mt-3">
+                                    <h4 class="font-bold text-slate-800 text-base">${c.name}</h4>
+                                    <p class="text-xs text-slate-500 mt-1"><i class="fa-solid fa-phone mr-1"></i> 電話: ${c.phone || '無'}</p>
+                                    <div class="flex items-center gap-3 mt-2 text-xs text-slate-500 font-medium">
+                                        <span><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i> 場地：<strong class="text-rose-600">${c.location}</strong></span>
+                                        <span><i class="fa-regular fa-clock mr-1"></i> 時間：<strong>${timeLabel}</strong></span>
+                                    </div>
+                                </div>
+
+                                <div class="mt-3 p-2.5 bg-slate-50 rounded-lg border border-slate-100 text-xs text-slate-600">
+                                    <strong>面試評語備註：</strong>${noteContent}
+                                </div>
+                            </div>
+
+                            <div class="mt-4 pt-3 border-t border-slate-100 flex justify-between items-center gap-2">
+                                <div class="flex gap-1.5">
+                                    <button onclick="updateCandidateStatus('${c.id}', '面試通過')" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold px-2.5 py-1.5 rounded transition">
+                                        <i class="fa-solid fa-check mr-1"></i>面試通過
+                                    </button>
+                                    <button onclick="updateCandidateStatus('${c.id}', '未通過')" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold px-2.5 py-1.5 rounded transition">
+                                        <i class="fa-solid fa-xmark mr-1"></i>未通過
+                                    </button>
+                                </div>
+                                <button onclick="editCandidate('${c.id}')" class="text-slate-500 hover:text-indigo-600 text-xs font-medium">
+                                    <i class="fa-solid fa-pen-to-square"></i> 編輯
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+
+            target.innerHTML = `
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex items-center gap-2">
+                            <span class="bg-indigo-100 text-indigo-600 p-1.5 rounded-lg"><i class="fa-solid fa-users-gear"></i></span>
+                            <h3 class="font-bold text-slate-800 text-sm">面試人員狀態評估 (HR / 主管協作)</h3>
+                        </div>
+                        <button onclick="openCandidateModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition">
+                            <i class="fa-solid fa-user-plus"></i> 新增面試人員
+                        </button>
+                    </div>
+                    <p class="text-xs text-slate-500 mb-4">
+                        面試官與人資可在這裡針對初試候選人進行「面試通過」或「未通過」操作。若設定為「面試通過」且該職缺在後台設有二次面試，系統將會引導進入二次複試排程。
+                    </p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${cardsHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        // 快速更新候選人狀態 (通過 / 未通過)
+        async function updateCandidateStatus(candId, newStatus) {
+            const cand = window.state.candidates.find(c => c.id === candId);
+            if (!cand) return;
+
+            cand.status = newStatus;
+            
+            // 判斷是否需要推到二試
+            const vac = window.state.vacancies.find(v => v.id === cand.vacancyId);
+            const hasSecond = vac ? vac.steps.includes("二次面試") : false;
+
+            if ((newStatus === '面試通過' || newStatus === '通過' || newStatus === '面釋通過') && hasSecond) {
+                cand.secondStatus = '待排程';
+                cand.secondInterviewer = vac.interviewers[1] || "執行長";
+                window.showToast(`已判定『${cand.name}』面試通過，已自動推播至『二次面試待排程區』！`);
+            } else {
+                window.showToast(`已成功更新『${cand.name}』面試結果為: ${newStatus}`);
+            }
+
+            await window.dbSetCandidate(cand);
+        }
+    </script>
+
+    <script>
+        function renderSecondInterviewPage(target) {
+            const secondList = window.state.candidates.filter(c => {
+                const vac = window.state.vacancies.find(v => v.id === c.vacancyId);
+                const hasSecondStep = vac ? vac.steps.includes("二次面試") : false;
+                return (c.status === '面試通過' || c.status === '通過' || c.status === '面釋通過') && hasSecondStep;
+            });
+
+            const pendingList = secondList.filter(c => c.secondStatus === '未排程' || c.secondStatus === '待排程');
+            const scheduledList = secondList.filter(c => c.secondStatus === '已確認');
+
+            // 1. 生成待排程卡片 HTML
+            let pendingCardsHtml = '';
+            if (pendingList.length === 0) {
+                pendingCardsHtml = `
+                    <div class="py-10 text-center text-slate-400 text-xs">
+                        <i class="fa-regular fa-circle-check text-3xl mb-2 text-slate-300 block"></i>
+                        目前沒有待安排的二次面試者。
+                    </div>
+                `;
+            } else {
+                let cardsStr = '';
+                pendingList.forEach(c => {
+                    const vac = window.state.vacancies.find(v => v.id === c.vacancyId);
+                    const vacName = vac ? vac.name : '未知職缺';
+                    const suggestedInterviewer = c.secondInterviewer || (vac ? vac.interviewers[1] : '執行長');
+
+                    cardsStr += `
+                        <div class="border-2 border-dashed border-rose-200 bg-rose-50/10 rounded-xl p-4 flex flex-col justify-between">
+                            <div>
+                                <div class="flex justify-between items-start mb-2">
+                                    <span class="px-2 py-0.5 bg-rose-100 text-rose-700 text-[10px] rounded-md font-bold">
+                                        應徵：${vacName}
+                                    </span>
+                                    <span class="text-[11px] text-slate-400 font-medium">1面場地: ${c.location}</span>
+                                </div>
+                                <h5 class="font-bold text-slate-800 text-base mb-1">${c.name}</h5>
+                                
+                                <div class="mt-2 bg-slate-50 p-2 rounded text-xs text-slate-600">
+                                    <strong>1面主管評語：</strong>
+                                    <p class="text-[11px] text-slate-500 italic mt-0.5">"${c.note || '無備註'}"</p>
+                                </div>
+
+                                <div class="mt-3 text-xs text-slate-500 space-y-1">
+                                    <div>建議二試官：<strong class="text-slate-700">${suggestedInterviewer}</strong></div>
+                                    <div>建議二試場地：<strong class="text-rose-600">北屯總部 (預設)</strong></div>
+                                </div>
+                            </div>
+
+                            <!-- 排程按鈕 -->
+                            <div class="mt-4 pt-3 border-t border-slate-100 flex justify-end">
+                                <button onclick="openSecondModal('${c.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition shadow-sm">
+                                    <i class="fa-solid fa-calendar-plus"></i> 由執行長/HR選擇二試日期與場地
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+                pendingCardsHtml = `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">${cardsStr}</div>`;
+            }
+
+            // 2. 生成已排程表格行 HTML
+            let scheduledRowsHtml = '';
+            if (scheduledList.length === 0) {
+                scheduledRowsHtml = `
+                    <tr>
+                        <td colspan="6" class="py-8 text-center text-slate-400">目前尚無已排定的複試行程。</td>
+                    </tr>
+                `;
+            } else {
+                scheduledList.forEach(c => {
+                    const vac = window.state.vacancies.find(v => v.id === c.vacancyId);
+                    const vacName = vac ? vac.name : '未知職缺';
+                    const secondLoc = c.secondLocation || '北屯總部';
+
+                    scheduledRowsHtml += `
+                        <tr class="hover:bg-slate-50/50">
+                            <td class="py-3 px-3 font-bold text-slate-800">${c.name}</td>
+                            <td class="py-3 px-3">${vacName}</td>
+                            <td class="py-3 px-3 font-semibold text-indigo-700"><i class="fa-solid fa-user-tie text-[10px] mr-1"></i>${c.secondInterviewer}</td>
+                            <td class="py-3 px-3 text-rose-600 font-bold">${secondLoc}</td>
+                            <td class="py-3 px-3 font-medium">${formatDateTime(c.secondDateTime)}</td>
+                            <td class="py-3 px-3 text-center">
+                                <div class="flex justify-center gap-1">
+                                    <button onclick="finalizeCandidate('${c.id}', '錄取')" class="bg-emerald-600 text-white text-[10px] px-2 py-1 rounded hover:bg-emerald-700 transition font-bold">錄取</button>
+                                    <button onclick="finalizeCandidate('${c.id}', '淘汰')" class="bg-slate-200 text-slate-700 text-[10px] px-2 py-1 rounded hover:bg-slate-300 transition font-bold">淘汰</button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+
+            // 3. 渲染至畫面上
+            target.innerHTML = `
+                <!-- 頁面說明 -->
+                <div class="bg-indigo-900 text-white rounded-2xl p-5 mb-6 shadow-md flex flex-wrap justify-between items-center gap-4">
+                    <div class="max-w-xl">
+                        <h3 class="font-bold text-lg mb-1 flex items-center gap-1.5">
+                            <i class="fa-solid fa-calendar-check text-amber-400"></i>
+                            二次面試 (複試) 排程中心
+                        </h3>
+                        <p class="text-xs text-indigo-200 leading-relaxed">
+                            當初試狀態標記為「面試通過」且需要二次複試的職缺，將自動同步推送至本專區。由執行長或 HR 直接進行二次面試的日期、時間與場地指派。
+                        </p>
+                    </div>
+                    <div class="bg-indigo-800 p-3 rounded-xl text-center">
+                        <span class="text-xs text-indigo-300 font-semibold block">待安排複試</span>
+                        <span class="text-2xl font-bold text-amber-300 mt-1">${pendingList.length} <span class="text-xs font-normal">人</span></span>
+                    </div>
+                </div>
+
+                <!-- 1. 待排程區 -->
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
+                    <h4 class="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2 text-rose-600">
+                        <span class="w-2 h-2 rounded-full bg-rose-600 animate-ping"></span>
+                        二審待排程 (1面已通過，請指派2面日期與時間地點)
+                    </h4>
+                    ${pendingCardsHtml}
+                </div>
+
+                <!-- 2. 已確認排程區 -->
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                    <h4 class="font-bold text-slate-800 text-sm mb-3 flex items-center gap-1.5 text-indigo-700">
+                        <i class="fa-solid fa-circle-check"></i>
+                        已確認二次面試行程與場地分配
+                    </h4>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead>
+                                <tr class="bg-slate-50 border-b border-slate-100 text-slate-400 font-bold uppercase">
+                                    <th class="py-2.5 px-3">姓名</th>
+                                    <th class="py-2.5 px-3">應徵職缺</th>
+                                    <th class="py-2.5 px-3">二次面試官</th>
+                                    <th class="py-2.5 px-3">複試場地</th>
+                                    <th class="py-2.5 px-3">複試時間</th>
+                                    <th class="py-2.5 px-3 text-center">最後決策</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                ${scheduledRowsHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 彈出二試排程視窗
+        function openSecondModal(candId) {
+            const cand = window.state.candidates.find(c => c.id === candId);
+            if (!cand) return;
+
+            const vac = window.state.vacancies.find(v => v.id === cand.vacancyId);
+
+            document.getElementById('second-cand-id').value = candId;
+            document.getElementById('second-cand-name').innerText = cand.name;
+            document.getElementById('second-cand-vacancy').innerText = vac ? vac.name : '未知職缺';
+            
+            document.getElementById('second-form-interviewer').value = cand.secondInterviewer || (vac ? vac.interviewers[1] : '執行長、重恩');
+            document.getElementById('second-form-location').value = "北屯總部";
+
+            document.getElementById('second-schedule-modal').classList.remove('hidden');
+        }
+
+        function closeSecondModal() {
+            document.getElementById('second-schedule-modal').classList.add('hidden');
+        }
+
+        // 二試提交處理
+        async function handleSecondScheduleSubmit(e) {
+            e.preventDefault();
+            const candId = document.getElementById('second-cand-id').value;
+            const cand = window.state.candidates.find(c => c.id === candId);
+            
+            if (cand) {
+                cand.secondInterviewer = document.getElementById('second-form-interviewer').value;
+                cand.secondLocation = document.getElementById('second-form-location').value;
+                cand.secondDateTime = document.getElementById('second-form-datetime').value;
+                cand.secondStatus = '已確認';
+                
+                window.showToast(`已成功為『${cand.name}』排定二次面試時間與場地！`);
+                await window.dbSetCandidate(cand);
+                closeSecondModal();
+            }
+        }
+
+        // 最終錄取與淘汰
+        async function finalizeCandidate(candId, decision) {
+            const cand = window.state.candidates.find(c => c.id === candId);
+            if (!cand) return;
+
+            if (decision === '錄取') {
+                cand.status = '面試通過';
+                cand.secondStatus = '已確認';
+                cand.note = `【決策：核定錄取】 二審複試通過，准予核定錄取。`;
+                window.showToast(`【已發送通知！】成功錄取候選人『${cand.name}』！`);
+            } else {
+                cand.status = '未通過';
+                cand.secondStatus = '';
+                cand.note = `【決策：未錄取】 複試未達標準。`;
+                window.showToast(`已將候選人 『${cand.name}』 標記為未錄取。`);
+            }
+
+            await window.dbSetCandidate(cand);
+        }
+    </script>
+
+    <script>
+        function renderSettingsPage(target) {
+            let vacanciesCardsHtml = '';
+            window.state.vacancies.forEach(v => {
+                let stepsChainHtml = '';
+                v.steps.forEach((step, idx) => {
+                    const isLast = idx === v.steps.length - 1;
+                    stepsChainHtml += `
+                        <span class="bg-slate-100 text-slate-700 text-[11px] px-2 py-0.5 rounded-md font-medium">
+                            ${step}
+                        </span>
+                        ${!isLast ? `<i class="fa-solid fa-angles-right text-slate-300 text-[9px] mx-1"></i>` : ''}
+                    `;
+                });
+
+                let secondInterviewerSection = '';
+                if (v.interviewers[1]) {
+                    secondInterviewerSection = `
+                        <div class="flex justify-between text-slate-600">
+                            <span>二次面試主管 (複試)：</span>
+                            <strong class="text-slate-800">${v.interviewers[1]}</strong>
+                        </div>
+                    `;
+                }
+
+                vacanciesCardsHtml += `
+                    <div class="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between shadow-sm">
+                        <div>
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-lg border border-indigo-100">
+                                    ${v.department}
+                                </span>
+                                <div class="space-x-2">
+                                    <button onclick="editVacancy('${v.id}')" class="text-xs text-indigo-600 hover:text-indigo-900 font-medium">編輯</button>
+                                    <button onclick="deleteVacancy('${v.id}')" class="text-xs text-red-500 hover:text-red-700 font-medium">刪除</button>
+                                </div>
+                            </div>
+                            <h4 class="font-bold text-slate-800 text-base mb-1">${v.name}</h4>
+                            
+                            <!-- 流程鏈 -->
+                            <div class="mt-3">
+                                <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">預設關卡流程：</span>
+                                <div class="flex items-center flex-wrap gap-1">
+                                    ${stepsChainHtml}
+                                </div>
+                            </div>
+
+                            <!-- 面試官 -->
+                            <div class="mt-4 p-2.5 bg-slate-50 rounded-lg border border-slate-100 text-xs space-y-1">
+                                <div class="flex justify-between text-slate-600">
+                                    <span>一次面試主管 (初試)：</span>
+                                    <strong class="text-slate-800">${v.interviewers[0] || '無'}</strong>
+                                </div>
+                                ${secondInterviewerSection}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            target.innerHTML = `
+                <!-- 後台說明與自訂金鑰指南 -->
+                <div class="bg-slate-900 text-white rounded-2xl shadow-md p-5 mb-6">
+                    <div class="flex items-center gap-2.5 border-b border-slate-800 pb-3 mb-4">
+                        <span class="bg-indigo-600 text-white p-2 rounded-xl text-sm"><i class="fa-solid fa-cloud-arrow-up"></i></span>
+                        <div>
+                            <h3 class="font-bold text-sm">GitHub Pages + Firebase 雲端設定說明</h3>
+                            <p class="text-xs text-slate-400">目前本頁面已完整封裝好您的專屬 Firebase 金鑰與 Excel 結構。</p>
+                        </div>
+                    </div>
+                    <div class="text-xs text-slate-300 leading-relaxed space-y-2">
+                        <p>💡 <strong>GitHub 貼上說明：</strong></p>
+                        <p class="text-[11px] text-slate-400">
+                            您可直接將此網頁代碼複製並命名為 <strong>index.html</strong>，提交到您的 GitHub 儲存庫（Repository）並開啟 <strong>GitHub Pages</strong>。系統將即時對接您的雲端資料庫 <code class="bg-slate-800 px-1.5 py-0.5 rounded text-amber-400 font-mono text-[11px]">interview-c3631</code>，跨裝置數據同步無阻。
+                        </p>
+                    </div>
+                </div>
+
+                <!-- 職缺設定 -->
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex items-center gap-2">
+                            <span class="bg-indigo-100 text-indigo-600 p-1.5 rounded-lg"><i class="fa-solid fa-sliders"></i></span>
+                            <h3 class="font-bold text-slate-800 text-sm">最新職缺設定、面試流程與人員分派後台</h3>
+                        </div>
+                        <button onclick="openVacancyModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-2 rounded-lg font-medium flex items-center gap-1.5 transition">
+                            <i class="fa-solid fa-plus"></i> 開放新職缺與流程
+                        </button>
+                    </div>
+                    <p class="text-xs text-slate-500">
+                        HR 可在此後台設定新增職缺，並規劃關卡（僅一次面試、或初試+複試兩關）。設定好預設主管與流程後，新增面試人員時系統將會自動帶入面試官資料。
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    ${vacanciesCardsHtml}
+                </div>
+            `;
+        }
+
+        // 調整二次面試官輸入欄位顯示
+        function adjustInterviewerFields(stageCount) {
+            const field = document.getElementById('field-second-interviewer');
+            const int2 = document.getElementById('form-vac-int2');
+            if (!field || !int2) return;
+            if (stageCount === "1") {
+                field.classList.add('hidden');
+                int2.removeAttribute('required');
+            } else {
+                field.classList.remove('hidden');
+                int2.setAttribute('required', 'required');
+            }
+        }
+
+        // 開啟/關閉新增職缺 Modal
+        function openVacancyModal() {
+            document.getElementById('vacancy-form').reset();
+            document.getElementById('form-vacancy-id').value = "";
+            document.getElementById('vacancy-modal-title').innerText = "新增職缺與面試流程";
+            adjustInterviewerFields("2");
+            document.getElementById('vacancy-modal').classList.remove('hidden');
+        }
+
+        function closeVacancyModal() {
+            document.getElementById('vacancy-modal').classList.add('hidden');
+        }
+
+        // 新增與修改職缺提交處理
+        async function handleVacancySubmit(e) {
+            e.preventDefault();
+            const id = document.getElementById('form-vacancy-id').value;
+            const name = document.getElementById('form-vac-name').value;
+            const dept = document.getElementById('form-vac-dept').value;
+            const stageCount = document.getElementById('form-vac-stagecount').value;
+            const int1 = document.getElementById('form-vac-int1').value;
+            
+            const interviewers = [int1];
+            const steps = ["初審", "一次面試"];
+            
+            if (stageCount === "2") {
+                const int2 = document.getElementById('form-vac-int2').value;
+                interviewers.push(int2);
+                steps.push("二次面試");
+            }
+            steps.push("錄取");
+
+            if (id) {
+                const vac = window.state.vacancies.find(v => v.id === id);
+                if (vac) {
+                    vac.name = name;
+                    vac.department = dept;
+                    vac.steps = steps;
+                    vac.interviewers = interviewers;
+                    window.showToast(`已成功修改職缺 『${name}』 的面試流程配置！`);
+                    await window.dbSetVacancy(vac);
+                }
+            } else {
+                const newVac = {
+                    id: 'v_' + Date.now(),
+                    name,
+                    department: dept,
+                    steps,
+                    interviewers
+                };
+                window.showToast(`已成功新增開放職缺：『${name}』！`);
+                await window.dbSetVacancy(newVac);
+            }
+
+            closeVacancyModal();
+        }
+
+        // 編輯職缺流程
+        function editVacancy(id) {
+            const vac = window.state.vacancies.find(v => v.id === id);
+            if (!vac) return;
+
+            document.getElementById('form-vacancy-id').value = vac.id;
+            document.getElementById('form-vac-name').value = vac.name;
+            document.getElementById('form-vac-dept').value = vac.department;
+            
+            const hasSecond = vac.steps.includes("二次面試");
+            document.getElementById('form-vac-stagecount').value = hasSecond ? "2" : "1";
+            adjustInterviewerFields(hasSecond ? "2" : "1");
+
+            document.getElementById('form-vac-int1').value = vac.interviewers[0] || "";
+            if (hasSecond) {
+                document.getElementById('form-vac-int2').value = vac.interviewers[1] || "";
+            }
+
+            document.getElementById('vacancy-modal-title').innerText = "編輯職缺與預設流程";
+            document.getElementById('vacancy-modal').classList.remove('hidden');
+        }
+
+        // 刪除職缺
+        async function deleteVacancy(id) {
+            const vac = window.state.vacancies.find(v => v.id === id);
+            if (vac) {
+                window.showToast(`已刪除職缺：『${vac.name}』`);
+                await window.dbDeleteVacancy(id);
+            }
+        }
+    </script>
+
+    <script>
+        // 開啟/關閉面試人員 Modal
+        function openCandidateModal() {
+            document.getElementById('candidate-form').reset();
+            document.getElementById('form-candidate-id').value = "";
+            document.getElementById('modal-title').innerText = "新增面試人員與地點";
+            
+            populateFormVacancySelect();
+            
+            const now = new Date();
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            document.getElementById('form-datetime').value = now.toISOString().slice(0, 16);
+
+            document.getElementById('candidate-modal').classList.remove('hidden');
+        }
+
+        function closeCandidateModal() {
+            document.getElementById('candidate-modal').classList.add('hidden');
+        }
+
+        // 動態填充新增面試者中的應徵職缺下拉
+        function populateFormVacancySelect() {
+            const select = document.getElementById('form-vacancy');
+            if (!select) return;
+            select.innerHTML = '<option value="" disabled selected>請選擇職缺</option>';
+            window.state.vacancies.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v.id;
+                opt.textContent = `${v.name} (${v.department})`;
+                select.appendChild(opt);
+            });
+        }
+
+        // 當在表單選擇職缺時，自動根據預設配置填入對應「面試官」
+        function onFormVacancyChange(vacId) {
+            const vac = window.state.vacancies.find(v => v.id === vacId);
+            if (vac) {
+                document.getElementById('form-interviewer').value = vac.interviewers[0] || "";
+                // 預設場地
+                if (vac.department === '製造部') {
+                    document.getElementById('form-location').value = '生產中心';
+                } else if (vac.department === '物流部' || vac.department === '出貨部') {
+                    document.getElementById('form-location').value = '物流中心';
+                } else if (vac.department === '行銷部' || vac.department === '財務部' || vac.department === '行政管理部' || vac.department === '人資組' || vac.department === '研發部') {
+                    document.getElementById('form-location').value = '北屯總部';
+                } else {
+                    document.getElementById('form-location').value = '北屯總部';
+                }
+            }
+        }
+
+        // 提交面試人員資料 (新增 / 編輯)
+        async function handleCandidateSubmit(e) {
+            e.preventDefault();
+            const id = document.getElementById('form-candidate-id').value;
+            const name = document.getElementById('form-name').value;
+            const phone = document.getElementById('form-phone').value;
+            const vacancyId = document.getElementById('form-vacancy').value;
+            const location = document.getElementById('form-location').value;
+            const dateTime = document.getElementById('form-datetime').value;
+            const interviewer = document.getElementById('form-interviewer').value;
+            const status = document.getElementById('form-status').value;
+            const note = document.getElementById('form-note').value;
+
+            const vac = window.state.vacancies.find(v => v.id === vacancyId);
+            const hasSecond = vac ? vac.steps.includes("二次面試") : false;
+
+            if (id) {
+                const cand = window.state.candidates.find(c => c.id === id);
+                if (cand) {
+                    cand.name = name;
+                    cand.phone = phone;
+                    cand.vacancyId = vacancyId;
+                    cand.location = location;
+                    cand.dateTime = dateTime;
+                    cand.interviewer = interviewer;
+                    
+                    const prevStatus = cand.status;
+                    cand.status = status;
+                    cand.note = note;
+
+                    if ((status === '面試通過' || status === '通過' || status === '面釋通過') && hasSecond && prevStatus !== '面試通過' && prevStatus !== '通過' && prevStatus !== '面釋通過') {
+                        cand.secondStatus = '待排程';
+                        cand.secondInterviewer = vac.interviewers[1] || "執行長、重恩";
+                        cand.secondLocation = "北屯總部";
+                    }
+
+                    window.showToast(`已成功編輯候選人 『${name}』 的面試資料！`);
+                    await window.dbSetCandidate(cand);
+                }
+            } else {
+                const newCand = {
+                    id: 'c_' + Date.now(),
+                    name,
+                    phone,
+                    vacancyId,
+                    location,
+                    stage: "一次面試",
+                    status,
+                    interviewer,
+                    dateTime,
+                    note,
+                    secondInterviewer: hasSecond ? (vac.interviewers[1] || "執行長、重恩") : "",
+                    secondDateTime: "",
+                    secondLocation: hasSecond ? "北屯總部" : "",
+                    secondStatus: ((status === '面試通過' || status === '通過' || status === '面釋通過') && hasSecond) ? '待排程' : (hasSecond ? '未排程' : '')
+                };
+
+                window.showToast(`已成功安排 『${name}』 到 『${location}』 進行面試！`);
+                await window.dbSetCandidate(newCand);
+            }
+
+            closeCandidateModal();
+        }
+
+        // 編輯面試人員 (把資料填回表單)
+        function editCandidate(id) {
+            const cand = window.state.candidates.find(c => c.id === id);
+            if (!cand) return;
+
+            populateFormVacancySelect();
+
+            document.getElementById('form-candidate-id').value = cand.id;
+            document.getElementById('form-name').value = cand.name;
+            document.getElementById('form-phone').value = cand.phone || "";
+            document.getElementById('form-vacancy').value = cand.vacancyId;
+            document.getElementById('form-location').value = cand.location;
+            document.getElementById('form-datetime').value = cand.dateTime || "";
+            document.getElementById('form-interviewer').value = cand.interviewer;
+            document.getElementById('form-status').value = cand.status;
+            document.getElementById('form-note').value = cand.note || "";
+
+            document.getElementById('modal-title').innerText = "編輯面試人員排程";
+            document.getElementById('candidate-modal').classList.remove('hidden');
+        }
+
+        // 刪除面試者
+        async function deleteCandidate(id) {
+            const cand = window.state.candidates.find(c => c.id === id);
+            if (cand) {
+                window.showToast(`已刪除面試者：『${cand.name}』`);
+                await window.dbDeleteCandidate(id);
+            }
+        }
+    </script>
+
+    <!-- 新增/編輯面試者 Modal -->
+    <div id="candidate-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-lg w-full max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div class="flex justify-between items-center px-6 py-4 border-b border-slate-100">
+                <h3 class="font-bold text-slate-800" id="modal-title">安排新面試人員</h3>
+                <button onclick="closeCandidateModal()" class="text-slate-400 hover:text-slate-600 transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            
+            <form id="candidate-form" onsubmit="handleCandidateSubmit(event)" class="p-6 space-y-4">
+                <input type="hidden" id="form-candidate-id">
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">候選人姓名 <span class="text-red-500">*</span></label>
+                        <input type="text" id="form-name" required class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">聯絡電話</label>
+                        <input type="text" id="form-phone" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="09XX-XXXXXX">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">應徵職缺 <span class="text-red-500">*</span></label>
+                        <select id="form-vacancy" required onchange="onFormVacancyChange(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <!-- 動態產生 -->
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">面試場地 <span class="text-red-500">*</span></label>
+                        <select id="form-location" required class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="生產中心">生產中心</option>
+                            <option value="物流中心">物流中心</option>
+                            <option value="北屯總部">北屯總部</option>
+                            <option value="崇德門市">崇德門市</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">面試日期與時間 <span class="text-red-500">*</span></label>
+                        <input type="datetime-local" id="form-datetime" required class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">指定一次面試官 <span class="text-red-500">*</span></label>
+                        <input type="text" id="form-interviewer" required class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="主管姓名或職位">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">目前進度狀態</label>
+                    <select id="form-status" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="待面試">待面試</option>
+                        <option value="面試通過">面試通過</option>
+                        <option value="未通過">未通過</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">評語備註 / 履歷特點</label>
+                    <textarea id="form-note" rows="3" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="例如：1面表現優良..."></textarea>
+                </div>
+
+                <div class="pt-4 border-t border-slate-100 flex justify-end space-x-2">
+                    <button type="button" onclick="closeCandidateModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium transition">取消</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition">儲存資料</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 新增/編輯職缺 Modal -->
+    <div id="vacancy-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-lg w-full max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div class="flex justify-between items-center px-6 py-4 border-b border-slate-100">
+                <h3 class="font-bold text-slate-800" id="vacancy-modal-title">新增職缺與面試流程</h3>
+                <button onclick="closeVacancyModal()" class="text-slate-400 hover:text-slate-600 transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            
+            <form id="vacancy-form" onsubmit="handleVacancySubmit(event)" class="p-6 space-y-4">
+                <input type="hidden" id="form-vacancy-id">
+                
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">職缺名稱 <span class="text-red-500">*</span></label>
+                    <input type="text" id="form-vac-name" required placeholder="如：會計專員、作業員" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">部門別 <span class="text-red-500">*</span></label>
+                        <select id="form-vac-dept" required class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="製造部">製造部</option>
+                            <option value="研發部">研發部</option>
+                            <option value="財務部">財務部</option>
+                            <option value="行銷部">行銷部</option>
+                            <option value="人資組">人資組</option>
+                            <option value="行政管理部">行政管理部</option>
+                            <option value="物流部">物流部</option>
+                            <option value="出貨部">出貨部</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">面試階段</label>
+                        <select id="form-vac-stagecount" onchange="adjustInterviewerFields(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="1">僅一次面試</option>
+                            <option value="2" selected>二次面試（初試＋複試）</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                    <span class="text-xs font-bold text-slate-600 block"><i class="fa-solid fa-sitemap mr-1"></i> 面試官自動設定</span>
+                    
+                    <div>
+                        <label class="block text-[11px] font-semibold text-slate-500 mb-1">預設一次面試官 <span class="text-red-500">*</span></label>
+                        <input type="text" id="form-vac-int1" required placeholder="如：潘哥、全恩" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+
+                    <div id="field-second-interviewer">
+                        <label class="block text-[11px] font-semibold text-slate-500 mb-1">預設二次面試官 <span class="text-red-500">*</span></label>
+                        <input type="text" id="form-vac-int2" required placeholder="如：執行長、重恩" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                </div>
+
+                <p class="text-[11px] text-slate-400">
+                    💡 設定預設面試官後，建立面試人員將會自動代入，大幅提升人資邀約作業速度！
+                </p>
+
+                <div class="pt-4 border-t border-slate-100 flex justify-end space-x-2">
+                    <button type="button" onclick="closeVacancyModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium transition">取消</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition">確認新增</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 二次面試安排 Modal -->
+    <div id="second-schedule-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full">
+            <div class="flex justify-between items-center px-6 py-4 border-b border-slate-100">
+                <h3 class="font-bold text-slate-800"><i class="fa-solid fa-calendar-plus text-indigo-500 mr-1"></i> 排定二次面試時間、場地</h3>
+                <button onclick="closeSecondModal()" class="text-slate-400 hover:text-slate-600 transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            
+            <form id="second-schedule-form" onsubmit="handleSecondScheduleSubmit(event)" class="p-6 space-y-4">
+                <input type="hidden" id="second-cand-id">
+                
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1">候選人姓名</label>
+                    <div id="second-cand-name" class="font-bold text-slate-800 text-base bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
+                        -
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">應徵職缺</label>
+                        <div id="second-cand-vacancy" class="text-sm text-slate-700 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 font-medium">
+                            -
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">二次面試官</label>
+                        <input type="text" id="second-form-interviewer" required class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="例如：執行長">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">二試場地 <span class="text-red-500">*</span></label>
+                        <select id="second-form-location" required class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="北屯總部">北屯總部</option>
+                            <option value="生產中心">生產中心</option>
+                            <option value="物流中心">物流中心</option>
+                            <option value="崇德門市">崇德門市</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">二次面試日期時間 <span class="text-red-500">*</span></label>
+                        <input type="datetime-local" id="second-form-datetime" required class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t border-slate-100 flex justify-end space-x-2">
+                    <button type="button" onclick="closeSecondModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium transition">取消</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition">確定排定二試</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 提示框 (Toast Notification) -->
+    <div id="toast" class="fixed bottom-6 right-6 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-2 transform translate-y-20 opacity-0 transition-all duration-300 z-50">
+        <i class="fa-solid fa-circle-check text-emerald-400" id="toast-icon"></i>
+        <span id="toast-msg" class="text-sm font-medium">提示訊息</span>
+    </div>
+
+    <script>
+        // 全域 Toast 顯示
+        window.showToast = function(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-msg');
+            const toastIcon = document.getElementById('toast-icon');
+            if (!toast || !toastMsg || !toastIcon) return;
+            
+            toastMsg.innerText = msg;
+            if (isError) {
+                toastIcon.className = "fa-solid fa-triangle-exclamation text-rose-500";
+            } else {
+                toastIcon.className = "fa-solid fa-circle-check text-emerald-400";
+            }
+            
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+            
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        // 主應用渲染流程
+        window.renderApp = function() {
+            updateBadges();
+            updateVacancyFilterDropdown();
+            renderContent();
+        }
+    </script>
+</body>
+</html>
